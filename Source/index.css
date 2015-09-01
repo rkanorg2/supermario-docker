@@ -296,9 +296,9 @@ section#game {
 section.section-text {
     margin: auto;
     padding: 21px 70px;
-    max-width: 910px;
+   // max-width: 910px;
     font-size: 1.4em;
-    text-align: center;
+    text-align: left;
 }
 
 .link-github {
