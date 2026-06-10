@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mario-deployment
+  labels:
+    app: mario
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mario
+  template:
+    metadata:
+      labels:
+        app: mario
+    spec:
+      containers:
+        - name: mario
+          image: acrrkanmm1.azurecr.io/samples/mario:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
