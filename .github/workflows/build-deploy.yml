@@ -1,0 +1,60 @@
+name: build-and-deploy
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required for OIDC
+  contents: read
+
+env:
+  AZURE_RG: RkanMM-container
+  ACR_NAME: acrrkanmm1
+  AKS_NAME: AKSClusterrkanmm1
+  IMAGE_REPO: samples/mario
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ----- BUILD + SHIP (no local Docker) -----
+      - name: Build & push image with ACR Tasks
+        run: |
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "${IMAGE_REPO}:${GITHUB_SHA}" \
+            --image "${IMAGE_REPO}:latest" \
+            --build-arg "GIT_SHA=${GITHUB_SHA}" \
+            --file Dockerfile \
+            .
+
+      # ----- RUN (deploy to AKS) -----
+      - name: Set AKS context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ env.AZURE_RG }}
+          cluster-name: ${{ env.AKS_NAME }}
+
+      - name: Apply manifests
+        run: |
+          kubectl apply -f k8s/mariodev.yml
+          kubectl apply -f k8s/marioservice.yml
+          kubectl rollout status deployment/mario-deployment --timeout=180s
+
+      - name: Show service
+        run: kubectl get service web-service-mario -o wide
