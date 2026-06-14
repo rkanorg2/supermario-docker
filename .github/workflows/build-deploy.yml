@@ -50,8 +50,10 @@ jobs:
           resource-group: ${{ env.AZURE_RG }}
           cluster-name: ${{ env.AKS_NAME }}
 
-      - name: Apply manifests
+      - name: Apply manifests (image pinned to commit SHA tag)
         run: |
+          IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_REPO}:${GITHUB_SHA}"
+          sed -i "s|__IMAGE__|${IMAGE}|g" k8s/mariodev.yml
           kubectl apply -f k8s/mariodev.yml
           kubectl apply -f k8s/marioservice.yml
           kubectl rollout status deployment/mario-deployment --timeout=180s

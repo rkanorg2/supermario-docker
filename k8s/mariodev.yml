@@ -16,7 +16,10 @@ spec:
     spec:
       containers:
         - name: mario
-          image: acrrkanmm1.azurecr.io/samples/mario:latest
-          imagePullPolicy: Always
+          # Replaced by CI with the immutable commit-SHA tag (see .github/workflows/build-deploy.yml).
+          # Using an immutable tag is required for Defender for Cloud to correlate the
+          # running workload with the scanned ACR image in the cloud security graph.
+          image: __IMAGE__
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
