@@ -43,18 +43,22 @@ jobs:
             --file Dockerfile \
             .
 
-      # ----- RUN (deploy to AKS) -----
-
       - name: Get image digest
         id: digest
         run: |
-          DIGEST=$(az acr manifest show \
-            --registry "$ACR_NAME" \
-            --name "${IMAGE_REPO}:${GITHUB_SHA}" \
-            --query "digest" -o tsv)
+          # Query ACR for the digest of the tag we just pushed
+          DIGEST=$(az acr repository show-manifests \
+            --name "$ACR_NAME" \
+            --repository "$IMAGE_REPO" \
+            --query "[?tags[?@ == '${GITHUB_SHA}']].digest | [0]" -o tsv 2>/dev/null)
+          if [ -z "$DIGEST" ]; then
+            echo "::error::Failed to resolve image digest for ${IMAGE_REPO}:${GITHUB_SHA}"
+            exit 1
+          fi
           echo "IMAGE_DIGEST=${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "Resolved digest: ${DIGEST}"
 
+      # ----- RUN (deploy to AKS) -----
       - name: Set AKS context
         uses: azure/aks-set-context@v4
         with:
@@ -64,6 +68,7 @@ jobs:
       - name: Apply manifests (image pinned to immutable digest)
         run: |
           IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_REPO}@${{ steps.digest.outputs.IMAGE_DIGEST }}"
+          echo "Deploying image: ${IMAGE}"
           sed -i "s|__IMAGE__|${IMAGE}|g" k8s/mariodev.yml
           kubectl apply -f k8s/mariodev.yml
           kubectl apply -f k8s/marioservice.yml
