@@ -1,4 +1,4 @@
-name: build-and-deploy
+ame: build-and-deploy
 
 on:
   push:
@@ -44,15 +44,26 @@ jobs:
             .
 
       # ----- RUN (deploy to AKS) -----
+
+      - name: Get image digest
+        id: digest
+        run: |
+          DIGEST=$(az acr manifest show \
+            --registry "$ACR_NAME" \
+            --name "${IMAGE_REPO}:${GITHUB_SHA}" \
+            --query "digest" -o tsv)
+          echo "IMAGE_DIGEST=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "Resolved digest: ${DIGEST}"
+
       - name: Set AKS context
         uses: azure/aks-set-context@v4
         with:
           resource-group: ${{ env.AZURE_RG }}
           cluster-name: ${{ env.AKS_NAME }}
 
-      - name: Apply manifests (image pinned to commit SHA tag)
+      - name: Apply manifests (image pinned to immutable digest)
         run: |
-          IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_REPO}:${GITHUB_SHA}"
+          IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_REPO}@${{ steps.digest.outputs.IMAGE_DIGEST }}"
           sed -i "s|__IMAGE__|${IMAGE}|g" k8s/mariodev.yml
           kubectl apply -f k8s/mariodev.yml
           kubectl apply -f k8s/marioservice.yml
