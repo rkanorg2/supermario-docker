@@ -38,7 +38,6 @@ jobs:
           az acr build \
             --registry "$ACR_NAME" \
             --image "${IMAGE_REPO}:${GITHUB_SHA}" \
-            --image "${IMAGE_REPO}:latest" \
             --build-arg "GIT_SHA=${GITHUB_SHA}" \
             --file Dockerfile \
             .
