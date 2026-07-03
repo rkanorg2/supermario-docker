@@ -1,0 +1,100 @@
+name: Defender Image Scan + SARIF Anchor
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'Dockerfile'
+      - '.github/workflows/defender-scan.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'Dockerfile'
+      - '.github/workflows/defender-scan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  security-events: write
+  pull-requests: write
+
+jobs:
+  defender-scan:
+    runs-on: ubuntu-latest
+    env:
+      ACR_NAME: acrrkanmm1
+      IMAGE_REPO: samples/mario
+      DOCKERFILE: Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      # Login to Azure to pull image from ACR
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Pull the latest image from ACR and export to tar for Defender CLI
+      - name: Pull image from ACR and export to tar
+        run: |
+          az acr login --name "$ACR_NAME"
+          IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_REPO}:latest"
+          # Use the latest tag; fall back to most recent tag if latest doesn't exist
+          docker pull "$IMAGE" || {
+            TAG=$(az acr repository show-tags --name "$ACR_NAME" --repository "$IMAGE_REPO" \
+              --orderby time_desc --top 1 -o tsv)
+            IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_REPO}:${TAG}"
+            docker pull "$IMAGE"
+          }
+          docker save "$IMAGE" -o image.tar
+          echo "SCANNED_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      # Download Defender for Cloud CLI
+      - name: Download Defender for Cloud CLI
+        run: |
+          curl -fsSL -o defender "https://aka.ms/defender-cli_linux-x64"
+          chmod +x defender
+
+      # Image vulnerability scan (MDVM) + SBOM generation
+      - name: Defender image scan + SBOM
+        env:
+          DEFENDER_TENANT_ID: ${{ secrets.DEFENDER_TENANT_ID }}
+          DEFENDER_CLIENT_ID: ${{ secrets.DEFENDER_CLIENT_ID }}
+          DEFENDER_CLIENT_SECRET: ${{ secrets.DEFENDER_CLIENT_SECRET }}
+        run: |
+          ./defender scan image image.tar --scanner mdvm     --defender-output image.sarif
+          ./defender scan sbom  image.tar --scanner mdvmsbom --defender-output sbom.sarif --output sbom.cyclonedx.json
+          # Validate outputs exist
+          test -s image.sarif && test -s sbom.cyclonedx.json \
+            || { echo "::error::Defender scan produced no output. Check DEFENDER_* secrets."; exit 1; }
+
+      # Anchor SARIF findings to Dockerfile lines
+      - name: Anchor MDVM SARIF to Dockerfile
+        id: anchor
+        uses: fuj1g0n/sarif-dockerfile-anchor@v0.3.0
+        with:
+          sarif: image.sarif
+          sbom: sbom.cyclonedx.json
+          dockerfile: ${{ env.DOCKERFILE }}
+          output: image.enriched.sarif
+
+      # Upload enriched SARIF to GitHub Code Scanning (GHAS)
+      - name: Upload to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.anchor.outputs.sarif }}
+          category: defender-mdvm
+
+      # Upload raw artifacts for debugging
+      - name: Upload scan artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: defender-scan-results
+          path: |
+            image.sarif
+            sbom.cyclonedx.json
+            image.enriched.sarif
