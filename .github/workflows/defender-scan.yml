@@ -28,7 +28,10 @@ jobs:
       - uses: actions/checkout@v4
 
       # Build the image locally for scanning (separate from ACR Tasks production build)
+      # Workaround: base image uses deprecated Docker Schema 1 format
       - name: Build image locally for scan
+        env:
+          CONTAINERD_ENABLE_DEPRECATED_PULL_SCHEMA_1_IMAGE: "1"
         run: docker build -f "$DOCKERFILE" -t "$IMAGE" .
 
       # Export to tar 窶・Defender CLI requires a local artifact or pullable reference
