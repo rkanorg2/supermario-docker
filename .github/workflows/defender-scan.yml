@@ -1,0 +1,84 @@
+name: Defender Image Scan + SARIF Anchor
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'Dockerfile'
+      - '.github/workflows/defender-scan.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'Dockerfile'
+      - '.github/workflows/defender-scan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  defender-scan:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: supermario:scan
+      DOCKERFILE: Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      # Build the image locally for scanning (separate from ACR Tasks production build)
+      - name: Build image locally for scan
+        run: docker build -f "$DOCKERFILE" -t "$IMAGE" .
+
+      # Export to tar 窶・Defender CLI requires a local artifact or pullable reference
+      - name: Export image to tar
+        run: docker save "$IMAGE" -o image.tar
+
+      # Download Defender for Cloud CLI
+      - name: Download Defender for Cloud CLI
+        run: |
+          curl -fsSL -o defender "https://aka.ms/defender-cli_linux-x64"
+          chmod +x defender
+
+      # Image vulnerability scan (MDVM) + SBOM generation
+      # Each scan defaults --defender-output to defender.sarif, so name them explicitly
+      - name: Defender image scan + SBOM
+        env:
+          DEFENDER_TENANT_ID: ${{ secrets.DEFENDER_TENANT_ID }}
+          DEFENDER_CLIENT_ID: ${{ secrets.DEFENDER_CLIENT_SECRET }}
+          DEFENDER_CLIENT_SECRET: ${{ secrets.DEFENDER_CLIENT_SECRET }}
+        run: |
+          ./defender scan image image.tar --scanner mdvm     --defender-output image.sarif
+          ./defender scan sbom  image.tar --scanner mdvmsbom --defender-output sbom.sarif --output sbom.cyclonedx.json
+          # Validate outputs exist
+          test -s image.sarif && test -s sbom.cyclonedx.json \
+            || { echo "::error::Defender scan produced no output. Check DEFENDER_* secrets."; exit 1; }
+
+      # Anchor SARIF findings to Dockerfile lines
+      - name: Anchor MDVM SARIF to Dockerfile
+        id: anchor
+        uses: fuj1g0n/sarif-dockerfile-anchor@v1
+        with:
+          sarif: image.sarif
+          sbom: sbom.cyclonedx.json
+          dockerfile: ${{ env.DOCKERFILE }}
+          output: image.enriched.sarif
+
+      # Upload enriched SARIF to GitHub Code Scanning (GHAS)
+      - name: Upload to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.anchor.outputs.sarif }}
+          category: defender-mdvm
+
+      # Upload raw artifacts for debugging
+      - name: Upload scan artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: defender-scan-results
+          path: |
+            image.sarif
+            sbom.cyclonedx.json
+            image.enriched.sarif
