@@ -46,7 +46,7 @@ jobs:
       - name: Defender image scan + SBOM
         env:
           DEFENDER_TENANT_ID: ${{ secrets.DEFENDER_TENANT_ID }}
-          DEFENDER_CLIENT_ID: ${{ secrets.DEFENDER_CLIENT_SECRET }}
+          DEFENDER_CLIENT_ID: ${{ secrets.DEFENDER_CLIENT_ID }}
           DEFENDER_CLIENT_SECRET: ${{ secrets.DEFENDER_CLIENT_SECRET }}
         run: |
           ./defender scan image image.tar --scanner mdvm     --defender-output image.sarif
@@ -58,7 +58,7 @@ jobs:
       # Anchor SARIF findings to Dockerfile lines
       - name: Anchor MDVM SARIF to Dockerfile
         id: anchor
-        uses: fuj1g0n/sarif-dockerfile-anchor@v1
+        uses: fuj1g0n/sarif-dockerfile-anchor@v0.3.0
         with:
           sarif: image.sarif
           sbom: sbom.cyclonedx.json
